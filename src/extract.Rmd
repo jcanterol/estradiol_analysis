@@ -1,0 +1,23 @@
+---
+title: "PRA2-TCVD: Extraction"
+author: "Javier Cantero Lorenzo"
+date: '`r format(Sys.Date(),"%e de %B, %Y")`'
+output:
+  html_document:
+    toc: yes
+    number_sections: True
+  pdf_document:
+    toc: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Load RData file
+
+```{r read}
+# Assuming Rdata file is opened by double-click
+output_filename <- "../csv/estradiol_raw.csv"
+write.csv(estradl, file=output_filename)
+```

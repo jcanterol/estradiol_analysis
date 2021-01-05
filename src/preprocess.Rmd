@@ -1,0 +1,202 @@
+---
+title: "PRA2-TCVD: Cleaning"
+author: "Javier Cantero Lorenzo"
+date: '`r format(Sys.Date(),"%e de %B, %Y")`'
+output:
+  html_document:
+    toc: yes
+    number_sections: True
+  pdf_document:
+    toc: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r load_libraries, include=FALSE}
+library(VIM)
+library(dplyr)
+library(knitr)
+library(stringr)
+```
+
+
+First we load the csv file, taking into account that the delimiter is a semicolon and the American standard of decimal separation is used. 
+
+```{r read}
+# load csv file
+input_filename <- "../csv/estradiol_raw.csv"
+dataset <- read.csv(input_filename, sep=";", dec=".")
+```
+
+To check if the information has been loaded correctly we check the number of records, the number of variables, and their name.
+
+```{r explore}
+# number of records
+nrow(dataset)
+
+# number of variables
+ncol(dataset)
+
+# name of the variables
+colnames(dataset)
+```
+
+The characteristics of the dataset correspond to those expected, so we can continue with the analysis.
+
+```{r}
+kable(sample_n(dataset, 5))
+```
+
+Remove attribute X.
+
+```{r}
+dataset$X <- NULL
+```
+
+Select quantitative columns and force numerical class.
+
+```{r}
+# apply American standard of decimal separation
+columns_quantitative <- c('Id', 'Entage', 'Numchild', 'Agefbo', 'Agemenar', 'Estradl', 'BMI', 'WHR')
+dataset[columns_quantitative] <- sapply(dataset[columns_quantitative], gsub, pattern=',', replacement='.')
+
+# convert to numerical data type
+dataset[columns_quantitative] <- sapply(dataset[columns_quantitative], as.character)
+dataset[columns_quantitative] <- sapply(dataset[columns_quantitative], as.numeric)
+```
+
+Identify and remove duplicate ID values.
+
+```{r}
+# duplicate values
+subset(dataset$Id, duplicated(dataset$Id))
+
+# remove rows with same id (keeping one)
+dataset <- subset(dataset, !duplicated(dataset$Id))
+```
+
+Show unique Ethnic values and clean.
+```{r}
+kable(table(dataset$Ethnic))
+
+# trim whitespaces
+dataset$Ethnic <- trimws(dataset$Ethnic)
+
+# title capitalization standard
+dataset$Ethnic <- str_to_title(dataset$Ethnic)
+
+# specific spelling errors
+dataset$Ethnic <- str_replace_all(dataset$Ethnic, "Caucsian", "Caucasian")
+dataset$Ethnic <- str_replace_all(dataset$Ethnic, "Caucacian", "Caucasian")
+dataset$Ethnic <- str_replace_all(dataset$Ethnic, "Af Am", "African American")
+```
+
+Label Area and Anykids attributes.
+```{r}
+# data type transformation
+dataset$Area <- as.factor(dataset$Area)
+
+# one-hot encoding to label encoding
+dataset$Area <- factor(dataset$Area, levels=c(0, 1), labels=c("Urban", "Rural"))
+```
+
+Identify outliers in attributes.
+```{r}
+boxplot.stats(dataset$Estradl)$out
+boxplot.stats(dataset$Agemenar)$out
+boxplot.stats(dataset$BMI)$out
+boxplot.stats(dataset$WHR)$out
+
+tmp_agefbo <- dataset$Agefbo
+tmp_agefbo[tmp_agefbo==0] <- NA
+
+boxplot.stats(tmp_agefbo)$out
+```
+
+Visualize boxplots.
+
+```{r}
+boxplot(dataset$Estradl, main='Estradl (with outliers)')
+boxplot(dataset$Agemenar, main='Age of menarche')
+boxplot(tmp_agefbo, main='Age of first born child')
+boxplot(dataset$BMI, main='BMI')
+boxplot(dataset$WHR, main='WHR')
+```
+
+Remove outliers.
+```{r}
+dataset$Estradl[dataset$Estradl > 100] <- NA
+dataset$Agemenar[which(dataset$Agemenar %in% boxplot.stats(dataset$Agemenar)$out)] <- NA
+
+dataset$Agefbo[which(dataset$Agefbo %in% boxplot.stats(dataset$Agefbo)$out)] <- NA
+```
+
+Inconsistencies Anykids vs Numchild
+```{r}
+# save indexes with NA values for Anykids attribute
+anykids_na <- is.na(dataset$Anykids)
+
+# create new Anykids attribute using Numchild
+consistent_anykids <- as.numeric(dataset$Numchild > 0)
+
+dataset$Anykids <- consistent_anykids
+```
+
+Inconsistencies Entage vs Agemenar
+```{r}
+# data type transformation
+dataset$Anykids <- as.factor(dataset$Anykids)
+
+# one-hot encoding to label encoding
+dataset$Anykids <- factor(dataset$Anykids, levels=c(0, 1), labels=c("No", "Yes"))
+```
+
+Inconsistencies Agefbo vs Agemenar vs Numchild
+```{r}
+# temporal consistent attributes
+tmp_entage <- pmax(dataset$Entage, dataset$Agemenar)
+tmp_agemenar <- pmin(dataset$Entage, dataset$Agemenar)
+
+dataset$Entage <- tmp_entage
+dataset$Agemenar <- tmp_agemenar
+```
+
+Imputation of values
+```{r}
+# copy of original dataset before imputation
+tmp_original_dataset <- dataset
+ids_with_nans <- subset(dataset$Id, !complete.cases(dataset))
+
+# temporal dataframes
+tmp_dataset_afam <- subset(dataset, dataset$Ethnic == 'African American')
+tmp_dataset_cauc <- subset(dataset, dataset$Ethnic == 'Caucasian')
+
+# imputation with ethnic group neighbours
+tmp_dataset_afam <- kNN(tmp_dataset_afam, variable=c('Agemenar', 'Agefbo', 'Entage', 'Estradl', 'Numchild'), k=3, imp_var=FALSE)
+
+tmp_dataset_cauc <- kNN(tmp_dataset_cauc, variable=c('Agemenar', 'Agefbo', 'Entage', 'Estradl', 'Numchild'), k=3, imp_var=FALSE)
+
+# join temporal datasets
+dataset <- rbind(tmp_dataset_afam, tmp_dataset_cauc)
+```
+
+Show values before and after imputation.
+```{r}
+# original dataset
+original_subdataset <- subset(tmp_original_dataset, tmp_original_dataset$Id %in% ids_with_nans)
+kable(original_subdataset[order(original_subdataset$Id),])
+```
+
+```{r}
+# imputed dataset
+subdataset <- subset(dataset, dataset$Id %in% ids_with_nans)
+kable(subdataset[order(subdataset$Id),])
+```
+
+Save cleaned result
+```{r}
+output_filename <- '../csv/estradiol_clean.csv'
+write.csv(dataset, file=output_filename, row.names=FALSE)
+```

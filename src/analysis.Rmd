@@ -1,0 +1,126 @@
+---
+title: "PRA2-TCVD: Analysis"
+author: "Javier Cantero Lorenzo"
+date: '`r format(Sys.Date(),"%e de %B, %Y")`'
+output:
+  html_document:
+    toc: yes
+    number_sections: True
+  pdf_document:
+    toc: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r load_libraries, include=FALSE}
+library(VIM)
+library(dplyr)
+library(knitr)
+library(ggplot2)
+library(stringr)
+library(nortest)
+library(reshape2)
+```
+
+Load csv with clean dataset.
+```{r}
+dataset <- read.csv('../csv/estradiol_clean.csv', sep=",", dec=".")
+kable(sample_n(dataset, 5))
+```
+
+Shapiro-Wilk test to check normality.
+```{r}
+columns_quantitative <- c('Entage', 'Agefbo', 'Agemenar', 'Estradl', 'BMI', 'WHR')
+
+# convert to numerical data type
+dataset[columns_quantitative] <- sapply(dataset[columns_quantitative], as.character)
+dataset[columns_quantitative] <- sapply(dataset[columns_quantitative], as.numeric)
+
+dataset_quantitative <- dataset[columns_quantitative]
+```
+
+
+```{r}
+for (i in 1:ncol(dataset_quantitative)) {
+  swt <- shapiro.test(dataset_quantitative[,i])
+  print(columns_quantitative[i])
+  print(swt)
+}
+```
+
+Fligner-Killen test.
+```{r}
+a <- dataset$Estradl[dataset$Ethnic == 'Caucasian']
+b <- dataset$Estradl[dataset$Ethnic == 'African American']
+fligner.test(x=list(a,b))
+```
+
+Correlation heatmap.
+```{r}
+# Correlation matrix
+cormat <- round(cor(dataset_quantitative),2)
+melted_cormat <- melt(cormat, na.rm=TRUE)
+
+ggplot(data = melted_cormat, aes(Var2, Var1, fill = value))+
+ geom_tile(color = "white")+
+ scale_fill_gradient2(low = "blue", high = "red", mid = "white", 
+   midpoint = 0, limit = c(-1,1), space = "Lab", 
+   name="Pearson\nCorrelation") +
+  theme_minimal()+ 
+ theme(axis.text.x = element_text(angle = 45, vjust = 1, 
+    size = 12, hjust = 1))+
+ coord_fixed()
+```
+
+Samples.
+```{r}
+dataset_afam <- subset(dataset, dataset$Ethnic == 'African American')
+dataset_cauc <- subset(dataset, dataset$Ethnic == 'Caucasian')
+```
+
+Hypothesis constrast
+```{r}
+mean(dataset_afam$Estradl)
+mean(dataset_cauc$Estradl)
+sd(dataset_afam$Estradl)
+sd(dataset_cauc$Estradl)
+pnorm(-3.32029)
+qnorm(0.025)
+```
+
+Linear regression 1.
+```{r}
+multi.fit <- lm(Estradl~Ethnic+Entage+Numchild+Agefbo+Anykids+Agemenar+BMI+WHR+Area, data=dataset)
+summary(multi.fit)
+```
+
+Linear regression 2.
+```{r}
+multi.fit <- lm(Estradl~Ethnic+Entage+Agemenar+BMI, data=dataset)
+summary(multi.fit)
+```
+
+Basic statistics. Robust and non-robust.
+```{r}
+kable(sapply(dataset_quantitative, mean))
+kable(sapply(dataset_quantitative, sd))
+kable(sapply(dataset_quantitative, median))
+kable(sapply(dataset_quantitative, mad))
+```
+
+Pairs plot.
+```{r}
+pairs(dataset_quantitative,
+      col = "red",
+      pch = 18,
+      labels = c('Entage', 'Agefbo', 'Agemenar', 'Estradl', 'BMI', 'WHR'),
+      main = "Quantitative attributes pair plot")  
+```
+
+Density plots to compare ethnicity estradiol levels.
+```{r}
+comb_r <- rbind(dataset_afam, dataset_cauc)
+ggplot(comb_r, aes(Estradl, fill = Ethnic)) + geom_density(alpha = 0.25)
+```
